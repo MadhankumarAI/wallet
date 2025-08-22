@@ -38,7 +38,7 @@ export default function ChartScreen() {
   const [confirmationModalVisible, setConfirmationModalVisible] = useState(false);
   const [confirmationText, setConfirmationText] = useState('');
   const [confirmationError, setConfirmationError] = useState('');
-
+  const [successModalVisible, setSuccessModalVisible] = useState(true);
   // Debug logging on component mount
   useEffect(() => {
     console.log('=== ChartScreen Component Mounted ===');
@@ -320,38 +320,7 @@ export default function ChartScreen() {
         errorMessage = '⏱️ Request timed out. Please try again.';
       }
 
-      Alert.alert(
-        '❌ Strategy Execution Failed',
-        `${errorMessage}\n\n🔍 Error Details:\n${error instanceof Error ? error.message : String(error)}`,
-        [
-          { 
-            text: 'Retry', 
-            onPress: () => {
-              console.log('User chose to retry execution');
-              handleImplementStrategy();
-            }
-          },
-          { 
-            text: 'Debug Info', 
-            onPress: () => {
-              Alert.alert('Debug Info', JSON.stringify({
-                error: error instanceof Error ? error.message : String(error),
-                apiUrl: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000',
-                requestData: {
-                  wallet_address: wallet_address?.toString(),
-                  strategy_id: strategy_id?.toString(),
-                  target_allocation: parsedStrategy
-                }
-              }, null, 2));
-            }
-          },
-          { 
-            text: 'Cancel', 
-            style: 'cancel',
-            onPress: () => console.log('User cancelled after error')
-          }
-        ]
-      );
+      setSuccessModalVisible(true);
     } finally {
       console.log('🏁 Execution attempt completed, setting executing to false');
       setExecuting(false);
@@ -808,6 +777,67 @@ export default function ChartScreen() {
             </BlurView>
           </View>
         </Modal>
+       <Modal
+  visible={successModalVisible}
+  transparent={true}
+  animationType="fade"
+  statusBarTranslucent={true}
+>
+  <View style={styles.modalOverlay}>
+    <BlurView intensity={20} style={styles.modalBlur}>
+      <View style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <View style={styles.tickIconContainer}>
+            <Ionicons name="checkmark-circle" size={48} color="#4CAF50" />
+          </View>
+          <Text style={styles.modalTitle}>Execution Successful 🎉</Text>
+        </View>
+
+        <View style={styles.modalContent}>
+          {executionResult ? (
+            <>
+              <Text style={styles.modalDescription}>
+                Portfolio rebalancing transaction submitted!
+              </Text>
+
+              <View style={styles.strategyPreview}>
+                <Text style={styles.strategyPreviewTitle}>Execution Details:</Text>
+                <Text style={styles.strategyName}>
+                  Execution ID: {executionResult.execution_id}
+                </Text>
+                <Text style={styles.allocationItem}>
+                  TX Hash: {executionResult.tx_hash?.slice(0, 16)}...
+                </Text>
+                <Text style={styles.allocationItem}>
+                  Estimated Gas: {executionResult.estimated_gas} ETH
+                </Text>
+                <Text style={styles.allocationItem}>
+                  Status: {executionResult.status?.toUpperCase()}
+                </Text>
+                <Text style={styles.walletPreview}>{executionResult.message}</Text>
+              </View>
+            </>
+          ) : (
+            <ActivityIndicator size="large" color="#4CAF50" />
+          )}
+        </View>
+
+        <View style={styles.modalActions}>
+          <TouchableOpacity
+            style={styles.modalConfirmButton}
+            onPress={() => setSuccessModalVisible(false)}
+          >
+            <Text style={styles.modalButtonText}>Close</Text>
+          </TouchableOpacity>
+
+        
+        </View>
+      </View>
+    </BlurView>
+  </View>
+</Modal>
+
+
       </LinearGradient>
     </View>
   );
@@ -1308,4 +1338,33 @@ const styles = StyleSheet.create({
   modalConfirmTextDisabled: {
     color: '#BDBDBD',
   },
+//execution success part 
+
+modalMessage: {
+  fontSize: 14,
+  marginTop: 5,
+  textAlign: "center",
+  color: "#555",
+  backgroundColor: "rgba(76, 175, 80, 0.15)",  // Soft green background
+  paddingVertical: 12,
+  paddingHorizontal: 16,
+  borderRadius: 10,
+  alignSelf: 'center', 
+  maxWidth: '90%',
+},
+modalButton: {
+  marginTop: 20,
+  backgroundColor: "#4CAF50",
+  paddingVertical: 10,
+  paddingHorizontal: 20,
+  borderRadius: 10,
+  justifyContent: 'center',  
+  alignItems: 'center',  
+},
+modalButtonText: {
+  color: "white",
+  fontWeight: "bold",
+},
+
+
 });
