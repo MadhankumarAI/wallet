@@ -38,7 +38,7 @@ export default function ChartScreen() {
   const [confirmationModalVisible, setConfirmationModalVisible] = useState(false);
   const [confirmationText, setConfirmationText] = useState('');
   const [confirmationError, setConfirmationError] = useState('');
-  const [successModalVisible, setSuccessModalVisible] = useState(true);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
   // Debug logging on component mount
   useEffect(() => {
     console.log('=== ChartScreen Component Mounted ===');
