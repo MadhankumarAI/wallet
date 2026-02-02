@@ -16,13 +16,16 @@ export default function PortfolioDriftChart({
   driftHistory = [] 
 }: PortfolioDriftChartProps) {
   
+  // Better color palette for dark theme
+  const colors = ['#BB86FC', '#03DAC6', '#CF6679', '#FFC107', '#4CAF50', '#FF9800'];
+  
   // Prepare data for pie chart (current vs target)
   const pieData = Object.keys(currentAllocation).map((token, index) => ({
     name: token,
     population: currentAllocation[token],
-    color: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'][index % 4],
-    legendFontColor: '#fff',
-    legendFontSize: 12,
+    color: colors[index % colors.length],
+    legendFontColor: '#FFFFFF', // White text for dark theme
+    legendFontSize: 14,
   }));
 
   // Prepare data for line chart (drift over time)
@@ -57,8 +60,14 @@ export default function PortfolioDriftChart({
   };
 
   const pieChartConfig = {
-    color: (opacity = 1) => `rgba(187, 134, 252, ${opacity})`,
-    labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+    backgroundColor: 'transparent',
+    backgroundGradientFrom: 'transparent',
+    backgroundGradientTo: 'transparent',
+    color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`, // White for labels
+    labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`, // White for all text
+    style: {
+      borderRadius: 16,
+    },
   };
 
   // Calculate total drift
@@ -95,13 +104,15 @@ export default function PortfolioDriftChart({
         <Text style={styles.chartTitle}>Current vs Target Allocation</Text>
         <PieChart
           data={pieData}
-          width={width - 80}
-          height={200}
+          width={width - 60}
+          height={220}
           chartConfig={pieChartConfig}
           accessor="population"
           backgroundColor="transparent"
           paddingLeft="15"
           absolute
+          hasLegend={true}
+          style={styles.pieChart}
         />
       </View>
 
@@ -121,7 +132,7 @@ export default function PortfolioDriftChart({
       {/* Allocation Details */}
       <View style={styles.allocationDetails}>
         <Text style={styles.detailsTitle}>Allocation Details</Text>
-        {Object.keys(targetAllocation).map((token) => {
+        {Object.keys(targetAllocation).map((token, index) => {
           const target = targetAllocation[token] || 0;
           const current = currentAllocation[token] || 0;
           const drift = Math.abs(current - target);
@@ -129,11 +140,19 @@ export default function PortfolioDriftChart({
           
           return (
             <View key={token} style={styles.allocationRow}>
-              <Text style={styles.tokenName}>{token}</Text>
+              <View style={styles.tokenInfo}>
+                <View 
+                  style={[
+                    styles.colorIndicator, 
+                    { backgroundColor: colors[index % colors.length] }
+                  ]} 
+                />
+                <Text style={styles.tokenName}>{token}</Text>
+              </View>
               <View style={styles.allocationValues}>
                 <Text style={styles.currentValue}>{current.toFixed(1)}%</Text>
                 <Text style={styles.targetValue}>→ {target.toFixed(1)}%</Text>
-                <Text style={[styles.driftValue, { color: isOver ? '#FF9800' : '#4CAF50' }]}>
+                <Text style={[styles.driftValueSmall, { color: isOver ? '#FF9800' : '#4CAF50' }]}>
                   {isOver ? '+' : '-'}{drift.toFixed(1)}%
                 </Text>
               </View>
@@ -192,6 +211,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: 'center',
   },
+  pieChart: {
+    borderRadius: 16,
+    alignSelf: 'center',
+  },
   lineChart: {
     borderRadius: 16,
   },
@@ -212,11 +235,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
+  tokenInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  colorIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 8,
+  },
   tokenName: {
     fontSize: 14,
-    color: '#bb86fc',
+    color: '#fff', // Changed to white for better visibility
     fontWeight: '500',
-    flex: 1,
   },
   allocationValues: {
     flexDirection: 'row',
@@ -232,7 +265,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888',
   },
-  driftValue: {
+  driftValueSmall: {
     fontSize: 14,
     fontWeight: 'bold',
   },

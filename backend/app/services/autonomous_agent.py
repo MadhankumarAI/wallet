@@ -213,11 +213,13 @@ class AutonomousAgentService:
             # Get current portfolio state
             portfolio_state = await self._get_portfolio_state(wallet_address)
             if not portfolio_state:
+                logger.warning(f"Could not get portfolio state for wallet {wallet_address}, skipping monitoring cycle")
                 return
             
             # Check if portfolio meets minimum value requirement
-            if portfolio_state["total_usd_value"] < config["min_portfolio_value_usd"]:
-                logger.info(f"Portfolio value below minimum for wallet {wallet_address}")
+            total_value = portfolio_state.get("total_usd_value", 0)
+            if total_value < config["min_portfolio_value_usd"]:
+                logger.info(f"Portfolio value {total_value} below minimum {config['min_portfolio_value_usd']} for wallet {wallet_address}")
                 return
             
             # Assess portfolio drift
@@ -270,8 +272,14 @@ class AutonomousAgentService:
                 risk_score=risk_score
             )
             
-            # Cache market conditions
-            self.market_conditions_cache["current"] = market_conditions
+            # Cache market conditions as dict for easier access
+            self.market_conditions_cache["current"] = {
+                "volatility_high": market_conditions.volatility_high,
+                "trend_direction": market_conditions.trend_direction,
+                "volume_spike": market_conditions.volume_spike,
+                "correlation_breakdown": market_conditions.correlation_breakdown,
+                "risk_score": market_conditions.risk_score
+            }
             self.last_market_check = datetime.now(timezone.utc)
             
             logger.debug(f"Market conditions assessed: {market_conditions}")
@@ -283,7 +291,7 @@ class AutonomousAgentService:
         """Get current portfolio state for a wallet"""
         try:
             async with asyncio.timeout(30):  # 30 second timeout
-                # Get balances
+                # Get balances with null checks
                 eth_balance = await get_eth_balance(wallet_address, None)
                 usdc_balance = await get_erc20_balance(
                     wallet_address,
@@ -298,8 +306,21 @@ class AutonomousAgentService:
                     None
                 )
                 
+                # Handle None values from balance functions
+                if eth_balance is None:
+                    eth_balance = 0.0
+                if usdc_balance is None:
+                    usdc_balance = 0.0
+                if link_balance is None:
+                    link_balance = 0.0
+                
                 # Get prices
                 prices = await fetch_token_prices(["ETH", "USDC", "LINK"])
+                
+                # Handle None prices
+                if not prices or any(price is None for price in prices.values()):
+                    logger.warning(f"Some token prices are None for {wallet_address}, using default values")
+                    prices = {"ETH": 2000.0, "USDC": 1.0, "LINK": 15.0}  # Default fallback prices
                 
                 balances = {
                     "ETH": eth_balance,
@@ -329,6 +350,17 @@ class AutonomousAgentService:
     async def _analyze_portfolio_drift(self, wallet_address: str, portfolio_state: Dict) -> PortfolioDrift:
         """Analyze portfolio drift from target allocation"""
         try:
+            # Check if portfolio_state is valid
+            if not portfolio_state or not isinstance(portfolio_state, dict):
+                logger.warning(f"Invalid portfolio state for {wallet_address}, using default allocation")
+                return PortfolioDrift(
+                    total_drift_percent=0,
+                    token_drifts={},
+                    needs_rebalancing=False,
+                    suggested_allocation={"ETH": 40, "USDC": 30, "LINK": 30},
+                    urgency_level="low"
+                )
+            
             # Get the most recent strategy for this wallet
             strategy = await strategies.find_one(
                 {"wallet_address": wallet_address},
@@ -342,7 +374,7 @@ class AutonomousAgentService:
                 target_allocation = strategy.get("target_allocation", {"ETH": 40, "USDC": 30, "LINK": 30})
             
             # Calculate current allocation percentages
-            total_value = portfolio_state["total_usd_value"]
+            total_value = portfolio_state.get("total_usd_value", 0)
             if total_value == 0:
                 return PortfolioDrift(
                     total_drift_percent=0,
@@ -353,7 +385,8 @@ class AutonomousAgentService:
                 )
             
             current_allocation = {}
-            for token, usd_value in portfolio_state["usd_values"].items():
+            usd_values = portfolio_state.get("usd_values", {})
+            for token, usd_value in usd_values.items():
                 current_allocation[token] = (usd_value / total_value) * 100
             
             # Calculate drift for each token
@@ -478,6 +511,7 @@ class AutonomousAgentService:
             # Get current portfolio state
             portfolio_state = await self._get_portfolio_state(wallet_address)
             if not portfolio_state:
+                logger.warning(f"Could not get portfolio state for wallet {wallet_address}, skipping rebalancing")
                 return
             
             # Calculate required trades
@@ -505,7 +539,7 @@ class AutonomousAgentService:
                 "wallet_address": wallet_address,
                 "strategy_id": "autonomous_rebalancing",
                 "target_allocation": drift_analysis.suggested_allocation,
-                "current_balances": portfolio_state["balances"],
+                "current_balances": portfolio_state.get("balances", {}),
                 "trades_executed": trades_needed,
                 "tx_hash": tx_result["tx_hash"],
                 "status": "pending",
@@ -529,13 +563,25 @@ class AutonomousAgentService:
                                 target_allocation: Dict[str, float]) -> Dict:
         """Calculate trades needed to reach target allocation"""
         try:
-            total_value = portfolio_state["total_usd_value"]
-            current_balances = portfolio_state["balances"]
-            prices = portfolio_state["prices"]
+            if not portfolio_state or not isinstance(portfolio_state, dict):
+                logger.warning("Invalid portfolio state, cannot calculate trades")
+                return {}
+            
+            total_value = portfolio_state.get("total_usd_value", 0)
+            current_balances = portfolio_state.get("balances", {})
+            prices = portfolio_state.get("prices", {})
+            
+            if total_value == 0 or not prices:
+                logger.warning("Portfolio value is 0 or no prices available, cannot calculate trades")
+                return {}
             
             trades_needed = {}
             
             for token, target_pct in target_allocation.items():
+                if token not in prices or prices[token] == 0:
+                    logger.warning(f"Price not available for {token}, skipping")
+                    continue
+                    
                 target_usd_value = (target_pct / 100) * total_value
                 target_token_amount = target_usd_value / prices[token]
                 current_amount = current_balances.get(token, 0)
@@ -561,6 +607,15 @@ class AutonomousAgentService:
         try:
             today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             last_reset = config.get("last_trade_reset")
+            
+            # Handle both timezone-aware and naive datetimes
+            if last_reset:
+                if last_reset.tzinfo is None:
+                    # If naive, assume UTC
+                    last_reset = last_reset.replace(tzinfo=timezone.utc)
+                elif last_reset.tzinfo != timezone.utc:
+                    # Convert to UTC if different timezone
+                    last_reset = last_reset.astimezone(timezone.utc)
             
             # Reset daily count if it's a new day
             if not last_reset or last_reset < today:
@@ -598,16 +653,44 @@ class AutonomousAgentService:
     async def get_monitoring_status(self) -> Dict:
         """Get current monitoring service status"""
         try:
-            total_wallets = await wallet_monitoring_configs.count_documents({})
-            active_wallets = await wallet_monitoring_configs.count_documents({"enabled": True})
+            # Safe database operations
+            try:
+                total_wallets = await wallet_monitoring_configs.count_documents({})
+            except Exception as e:
+                logger.error(f"Error counting total wallets: {str(e)}")
+                total_wallets = 0
+                
+            try:
+                active_wallets = await wallet_monitoring_configs.count_documents({"enabled": True})
+            except Exception as e:
+                logger.error(f"Error counting active wallets: {str(e)}")
+                active_wallets = 0
             
             # Get recent autonomous actions
-            recent_actions = await autonomous_agent_logs.find().sort("timestamp", -1).limit(10).to_list(length=10)
+            try:
+                recent_actions = await autonomous_agent_logs.find().sort("timestamp", -1).limit(10).to_list(length=10)
+            except Exception as e:
+                logger.error(f"Error getting recent actions: {str(e)}")
+                recent_actions = []
             
             # Get recent executions
-            recent_executions = await executions.find(
-                {"execution_type": "autonomous"}
-            ).sort("created_at", -1).limit(10).to_list(length=10)
+            try:
+                recent_executions = await executions.find(
+                    {"execution_type": "autonomous"}
+                ).sort("created_at", -1).limit(10).to_list(length=10)
+            except Exception as e:
+                logger.error(f"Error getting recent executions: {str(e)}")
+                recent_executions = []
+            
+            # Safe market conditions access
+            market_conditions = {}
+            try:
+                market_conditions = self.market_conditions_cache.get("current", {})
+                if not isinstance(market_conditions, dict):
+                    market_conditions = {}
+            except Exception as e:
+                logger.error(f"Error accessing market conditions: {str(e)}")
+                market_conditions = {}
             
             return {
                 "service_running": self.is_running,
@@ -617,12 +700,22 @@ class AutonomousAgentService:
                 "last_market_check": self.last_market_check.isoformat() if self.last_market_check else None,
                 "recent_autonomous_actions": len(recent_actions),
                 "recent_autonomous_executions": len(recent_executions),
-                "market_conditions": self.market_conditions_cache.get("current", {})
+                "market_conditions": market_conditions
             }
             
         except Exception as e:
             logger.error(f"Error getting monitoring status: {str(e)}")
-            return {"error": str(e)}
+            # Return a default status instead of error object
+            return {
+                "service_running": False,
+                "total_monitored_wallets": 0,
+                "active_monitored_wallets": 0,
+                "active_monitoring_tasks": 0,
+                "last_market_check": None,
+                "recent_autonomous_actions": 0,
+                "recent_autonomous_executions": 0,
+                "market_conditions": {}
+            }
 
 # Global instance
 autonomous_agent_service = AutonomousAgentService()

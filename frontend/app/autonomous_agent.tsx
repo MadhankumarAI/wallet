@@ -13,6 +13,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { API_URL } from '../Api.jsx';
@@ -211,82 +212,191 @@ export default function AutonomousAgentScreen() {
     }
   };
 
+  const [showWalletInput, setShowWalletInput] = useState(false);
+  const [walletAddress, setWalletAddress] = useState('');
+  const [showStrategySelection, setShowStrategySelection] = useState(false);
+  const [selectedStrategy, setSelectedStrategy] = useState('balanced');
+
   const addWalletToMonitoring = () => {
-    Alert.prompt(
-      'Add Wallet to Monitoring',
-      'Enter wallet address:',
+    setShowWalletInput(true);
+  };
+
+  const handleWalletSubmit = () => {
+    if (walletAddress.trim()) {
+      setShowWalletInput(false);
+      setShowStrategySelection(true);
+    }
+  };
+
+  const handleStrategySubmit = () => {
+    if (selectedStrategy) {
+      addWalletToMonitoringInternal(walletAddress.trim(), selectedStrategy);
+      setShowStrategySelection(false);
+      setWalletAddress('');
+      setSelectedStrategy('balanced');
+    }
+  };
+
+  const removeWalletFromMonitoring = async (walletAddress: string) => {
+    // Simple confirmation alert
+    Alert.alert(
+      'Confirm Deletion',
+      `Are you sure you want to remove wallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} from monitoring?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Add', onPress: async (walletAddress) => {
-          if (walletAddress && walletAddress.trim()) {
-            try {
-              console.log('🚀 [DEBUG] ===== WALLET ADDITION STARTED =====');
-              console.log('🚀 [DEBUG] Adding wallet to monitoring:', walletAddress);
-              console.log('🚀 [DEBUG] API URL:', `${API_URL}/autonomous/monitor/wallet/public`);
-              
-              const requestBody = {
-                wallet_address: walletAddress.trim(),
-                enabled: true,
-                check_interval_minutes: 15,
-                drift_threshold_percent: 5.0,
-                max_daily_trades: 3,
-                risk_profile: 'balanced',
-                auto_execute: false,
-                slippage_tolerance: 1.0,
-                min_portfolio_value_usd: 100.0,
-              };
-              
-              console.log('🚀 [DEBUG] Request body:', requestBody);
-              console.log('🚀 [DEBUG] Current monitored wallets count BEFORE:', monitoredWallets.length);
-              
-              const response = await fetch(`${API_URL}/autonomous/monitor/wallet/public`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody),
-              });
-
-              console.log('🚀 [DEBUG] Response status:', response.status);
-              console.log('🚀 [DEBUG] Response ok:', response.ok);
-              
-              if (response.ok) {
-                const responseData = await response.json();
-                console.log('🚀 [DEBUG] Response data:', responseData);
-                console.log('🚀 [DEBUG] Wallet added successfully!');
-                
-                Alert.alert('Success', 'Wallet added to monitoring');
-                
-                console.log('🔄 [DEBUG] Calling loadData() to refresh...');
-                await loadData();
-                
-                console.log('🚀 [DEBUG] loadData() completed, checking state...');
-                console.log('🚀 [DEBUG] Monitored wallets count AFTER loadData:', monitoredWallets.length);
-                
-                // Force a re-render by updating state
-                console.log('🔄 [DEBUG] Forcing state update...');
-                setMonitoredWallets(prev => {
-                  console.log('🔄 [DEBUG] Previous monitored wallets:', prev);
-                  return [...prev];
-                });
-                
-              } else {
-                const errorText = await response.text();
-                console.error('❌ [DEBUG] Error response:', errorText);
-                Alert.alert('Error', `Failed to add wallet to monitoring: ${response.status} - ${errorText}`);
-              }
-            } catch (error) {
-              console.error('❌ [DEBUG] Error adding wallet:', error);
-              Alert.alert('Error', `Failed to add wallet to monitoring: ${error}`);
-            } finally {
-              console.log('🚀 [DEBUG] ===== WALLET ADDITION COMPLETED =====');
-            }
-          } else {
-            console.log('❌ [DEBUG] Invalid wallet address provided');
-          }
-        }},
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => executeWalletDeletion(walletAddress)
+        }
       ]
     );
+  };
+
+  const executeWalletDeletion = async (walletAddress: string) => {
+    try {
+      console.log('🗑️ [DEBUG] Executing wallet deletion:', walletAddress);
+      
+      const response = await fetch(`${API_URL}/autonomous/monitor/wallet/public`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ wallet_address: walletAddress }),
+      });
+
+      if (response.ok) {
+        console.log('✅ [DEBUG] Wallet removed successfully');
+        
+        // Remove from local state immediately
+        setMonitoredWallets(prev => prev.filter(w => w.wallet_address !== walletAddress));
+        
+        Alert.alert('Success', 'Wallet removed from monitoring');
+        
+        // Refresh data from server
+        await loadData();
+      } else {
+        const errorText = await response.text();
+        console.error('❌ [DEBUG] Error removing wallet:', errorText);
+        Alert.alert('Error', `Failed to remove wallet: ${response.status} - ${errorText}`);
+      }
+    } catch (error) {
+      console.error('❌ [DEBUG] Error removing wallet:', error);
+      Alert.alert('Error', `Failed to remove wallet: ${error}`);
+    }
+  };
+
+  const addWalletToMonitoringInternal = async (walletAddress: string, strategy: string = 'balanced') => {
+    if (walletAddress && walletAddress.trim()) {
+      try {
+        console.log('🚀 [DEBUG] ===== WALLET ADDITION STARTED =====');
+        console.log('🚀 [DEBUG] Adding wallet to monitoring:', walletAddress);
+        console.log('🚀 [DEBUG] Strategy selected:', strategy);
+        console.log('🚀 [DEBUG] API URL:', `${API_URL}/autonomous/monitor/wallet/public`);
+        
+        // Configure strategy-based parameters
+        let driftThreshold = 5.0;
+        let maxDailyTrades = 3;
+        let riskProfile = 'balanced';
+        
+        switch (strategy) {
+          case 'conservative':
+            driftThreshold = 3.0;
+            maxDailyTrades = 5;
+            riskProfile = 'conservative';
+            break;
+          case 'aggressive':
+            driftThreshold = 8.0;
+            maxDailyTrades = 2;
+            riskProfile = 'aggressive';
+            break;
+          case 'balanced':
+          default:
+            driftThreshold = 5.0;
+            maxDailyTrades = 3;
+            riskProfile = 'balanced';
+            break;
+        }
+        
+        const requestBody = {
+          wallet_address: walletAddress.trim(),
+          enabled: true,
+          check_interval_minutes: 15,
+          drift_threshold_percent: driftThreshold,
+          max_daily_trades: maxDailyTrades,
+          risk_profile: riskProfile,
+          auto_execute: false,
+          slippage_tolerance: 1.0,
+          min_portfolio_value_usd: 100.0,
+        };
+        
+        console.log('🚀 [DEBUG] Request body:', requestBody);
+        console.log('🚀 [DEBUG] Current monitored wallets count BEFORE:', monitoredWallets.length);
+        
+        const response = await fetch(`${API_URL}/autonomous/monitor/wallet/public`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        console.log('🚀 [DEBUG] Response status:', response.status);
+        console.log('🚀 [DEBUG] Response ok:', response.ok);
+        
+        if (response.ok) {
+          const responseData = await response.json();
+          console.log('🚀 [DEBUG] Response data:', responseData);
+          console.log('🚀 [DEBUG] Wallet added successfully!');
+          
+          // Immediately add the new wallet to local state for instant UI update
+          const newWallet: MonitoringConfig = {
+            wallet_address: walletAddress.trim(),
+            enabled: true,
+            check_interval_minutes: 15,
+            drift_threshold_percent: 5.0,
+            max_daily_trades: 3,
+            risk_profile: 'balanced',
+            auto_execute: false,
+            slippage_tolerance: 1.0,
+            min_portfolio_value_usd: 100.0,
+            created_at: new Date().toISOString(),
+            last_check: undefined,
+            daily_trades_count: 0,
+            last_trade_reset: new Date().toISOString(),
+          };
+          
+          console.log('🔄 [DEBUG] Updating local state immediately...');
+          setMonitoredWallets(prev => {
+            const updated = [...prev, newWallet];
+            console.log('🔄 [DEBUG] Updated monitored wallets:', updated);
+            return updated;
+          });
+          
+          Alert.alert('Success', 'Wallet added to monitoring');
+          
+          // Force immediate re-render and then refresh from server
+          console.log('🔄 [DEBUG] Forcing immediate re-render...');
+          setMonitoredWallets(prev => [...prev]); // Force re-render
+          
+          // Refresh data from server to ensure consistency
+          console.log('🔄 [DEBUG] Refreshing data from server...');
+          await loadData();
+          
+        } else {
+          const errorText = await response.text();
+          console.error('❌ [DEBUG] Error response:', errorText);
+          Alert.alert('Error', `Failed to add wallet to monitoring: ${response.status} - ${errorText}`);
+        }
+      } catch (error) {
+        console.error('❌ [DEBUG] Error adding wallet:', error);
+        Alert.alert('Error', `Failed to add wallet to monitoring: ${error}`);
+      } finally {
+        console.log('🚀 [DEBUG] ===== WALLET ADDITION COMPLETED =====');
+      }
+    } else {
+      console.log('❌ [DEBUG] Invalid wallet address provided');
+    }
   };
 
   const getRiskProfileColor = (profile: string) => {
@@ -302,7 +412,7 @@ export default function AutonomousAgentScreen() {
     return enabled ? '#4CAF50' : '#F44336';
   };
 
-  const formatTimestamp = (timestamp: string) => {
+  const formatTimestamp = (timestamp: string | undefined) => {
     if (!timestamp) return 'Never';
     const date = new Date(timestamp);
     return date.toLocaleString();
@@ -483,11 +593,15 @@ export default function AutonomousAgentScreen() {
                   <Text style={styles.emptyStateText}>No wallets being monitored</Text>
                   <Text style={styles.emptyStateSubtext}>Add a wallet to start autonomous monitoring</Text>
                 </View>
-              ) : (
-                monitoredWallets.map((wallet, index) => (
-                  <WalletMonitoringCard key={index} wallet={wallet} />
-                ))
-              )}
+                             ) : (
+                 monitoredWallets.map((wallet, index) => (
+                   <WalletMonitoringCard 
+                     key={index} 
+                     wallet={wallet} 
+                     onDelete={removeWalletFromMonitoring}
+                   />
+                 ))
+               )}
             </BlurView>
           </View>
 
@@ -551,6 +665,128 @@ export default function AutonomousAgentScreen() {
           </View>
         </Animated.View>
       </ScrollView>
+
+      {/* Wallet Input Modal */}
+      {showWalletInput && (
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={40} style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add Wallet to Monitoring</Text>
+            <Text style={styles.modalSubtitle}>Enter the wallet address you want to monitor</Text>
+            
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Wallet Address:</Text>
+              <TextInput
+                style={styles.textInput}
+                value={walletAddress}
+                onChangeText={setWalletAddress}
+                placeholder="0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6"
+                placeholderTextColor="#666"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <Pressable 
+                style={[styles.modalButton, styles.cancelButton]} 
+                onPress={() => setShowWalletInput(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable 
+                style={[styles.modalButton, styles.confirmButton]} 
+                onPress={handleWalletSubmit}
+              >
+                <Text style={styles.confirmButtonText}>Next</Text>
+              </Pressable>
+            </View>
+          </BlurView>
+        </View>
+      )}
+
+      {/* Strategy Selection Modal */}
+      {showStrategySelection && (
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={40} style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Monitoring Strategy</Text>
+            <Text style={styles.modalSubtitle}>Choose how aggressively to monitor this wallet</Text>
+            
+            <View style={styles.strategyContainer}>
+              <Pressable 
+                style={[
+                  styles.strategyOption, 
+                  selectedStrategy === 'conservative' && styles.strategyOptionSelected
+                ]}
+                onPress={() => setSelectedStrategy('conservative')}
+              >
+                <Ionicons name="shield-checkmark" size={24} color="#4CAF50" />
+                <View style={styles.strategyInfo}>
+                  <Text style={styles.strategyName}>Conservative</Text>
+                  <Text style={styles.strategyDescription}>
+                    Lower risk, lower drift threshold (3%), max 5 trades/day
+                  </Text>
+                </View>
+                {selectedStrategy === 'conservative' && (
+                  <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+                )}
+              </Pressable>
+              
+              <Pressable 
+                style={[
+                  styles.strategyOption, 
+                  selectedStrategy === 'balanced' && styles.strategyOptionSelected
+                ]}
+                onPress={() => setSelectedStrategy('balanced')}
+              >
+                <Ionicons name="analytics" size={24} color="#FF9800" />
+                <View style={styles.strategyInfo}>
+                  <Text style={styles.strategyName}>Balanced</Text>
+                  <Text style={styles.strategyDescription}>
+                    Medium risk, 5% drift threshold, max 3 trades/day
+                  </Text>
+                </View>
+                {selectedStrategy === 'balanced' && (
+                  <Ionicons name="checkmark-circle" size={24} color="#FF9800" />
+                )}
+              </Pressable>
+              
+              <Pressable 
+                style={[
+                  styles.strategyOption, 
+                  selectedStrategy === 'aggressive' && styles.strategyOptionSelected
+                ]}
+                onPress={() => setSelectedStrategy('aggressive')}
+              >
+                <Ionicons name="rocket" size={24} color="#F44336" />
+                <View style={styles.strategyInfo}>
+                  <Text style={styles.strategyName}>Aggressive</Text>
+                  <Text style={styles.strategyDescription}>
+                    Higher risk, 8% drift threshold, max 2 trades/day
+                  </Text>
+                </View>
+                {selectedStrategy === 'aggressive' && (
+                  <Ionicons name="checkmark-circle" size={24} color="#F44336" />
+                )}
+              </Pressable>
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <Pressable 
+                style={[styles.modalButton, styles.cancelButton]} 
+                onPress={() => setShowStrategySelection(false)}
+              >
+                <Text style={styles.cancelButtonText}>Back</Text>
+              </Pressable>
+              <Pressable 
+                style={[styles.modalButton, styles.confirmButton]} 
+                onPress={handleStrategySubmit}
+              >
+                <Text style={styles.confirmButtonText}>Add Wallet</Text>
+              </Pressable>
+            </View>
+          </BlurView>
+        </View>
+      )}
     </View>
   );
 }
@@ -573,7 +809,7 @@ const MarketConditionItem = ({ label, value, color }: { label: string; value: st
 );
 
 // Wallet Monitoring Card Component
-const WalletMonitoringCard = ({ wallet }: { wallet: MonitoringConfig }) => (
+const WalletMonitoringCard = ({ wallet, onDelete }: { wallet: MonitoringConfig; onDelete: (walletAddress: string) => void }) => (
   <View style={styles.walletCard}>
     <View style={styles.walletHeader}>
       <View style={styles.walletAddressContainer}>
@@ -582,7 +818,15 @@ const WalletMonitoringCard = ({ wallet }: { wallet: MonitoringConfig }) => (
           {wallet.wallet_address.slice(0, 6)}...{wallet.wallet_address.slice(-4)}
         </Text>
       </View>
-      <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(wallet.enabled) }]} />
+      <View style={styles.walletHeaderRight}>
+        <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(wallet.enabled) }]} />
+        <Pressable 
+          style={styles.deleteButton}
+          onPress={() => onDelete(wallet.wallet_address)}
+        >
+          <Ionicons name="trash-outline" size={16} color="#F44336" />
+        </Pressable>
+      </View>
     </View>
     
     <View style={styles.walletDetails}>
@@ -665,7 +909,7 @@ const getRiskProfileColor = (profile: string) => {
   }
 };
 
-const formatTimestamp = (timestamp: string) => {
+const formatTimestamp = (timestamp: string | undefined) => {
   if (!timestamp) return 'Never';
   const date = new Date(timestamp);
   return date.toLocaleString();
@@ -893,6 +1137,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
+  walletHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   walletAddressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -907,6 +1156,13 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
+  },
+  deleteButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 67, 54, 0.3)',
   },
   walletDetails: {
     gap: 8,
@@ -990,5 +1246,121 @@ const styles = StyleSheet.create({
     color: '#bb86fc',
     marginTop: 8,
     textAlign: 'center',
+  },
+  
+  // Modal Styles
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    width: '90%',
+    maxWidth: 400,
+    backgroundColor: 'rgba(30, 30, 30, 0.95)',
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(187, 134, 252, 0.3)',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  inputContainer: {
+    marginBottom: 24,
+  },
+  inputLabel: {
+    fontSize: 14,
+    color: '#bb86fc',
+    marginBottom: 8,
+  },
+  textInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: '#fff',
+    borderWidth: 1,
+    borderColor: 'rgba(187, 134, 252, 0.3)',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  confirmButton: {
+    backgroundColor: '#bb86fc',
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  confirmButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  
+  // Strategy Selection Styles
+  strategyContainer: {
+    marginBottom: 24,
+    gap: 12,
+  },
+  strategyOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  strategyOptionSelected: {
+    borderColor: '#bb86fc',
+    backgroundColor: 'rgba(187, 134, 252, 0.1)',
+  },
+  strategyInfo: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  strategyName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  strategyDescription: {
+    fontSize: 12,
+    color: '#888',
+    lineHeight: 16,
   },
 });

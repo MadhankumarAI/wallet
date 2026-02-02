@@ -45,6 +45,10 @@ class WalletMonitoringRequest(BaseModel):
     slippage_tolerance: float = 1.0
     min_portfolio_value_usd: float = 100.0
 
+class WalletDeleteRequest(BaseModel):
+    """Request to delete wallet from monitoring"""
+    wallet_address: str
+
 class WalletMonitoringResponse(BaseModel):
     """Response for wallet monitoring configuration"""
     wallet_address: str
@@ -349,6 +353,27 @@ async def update_wallet_monitoring(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to update monitoring configuration: {str(e)}"
+        )
+
+@router.delete("/monitor/wallet/public")
+async def remove_wallet_from_monitoring_public(
+    request: WalletDeleteRequest
+):
+    """Remove a wallet from autonomous monitoring (public endpoint for testing)"""
+    try:
+        wallet_address = request.wallet_address
+        
+        await autonomous_agent_service.remove_wallet_from_monitoring(wallet_address)
+        
+        return {
+            "status": "success",
+            "message": f"Wallet {wallet_address} removed from autonomous monitoring"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to remove wallet from monitoring: {str(e)}"
         )
 
 @router.delete("/monitor/wallet/{wallet_address}")
